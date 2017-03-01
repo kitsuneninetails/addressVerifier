@@ -1,22 +1,20 @@
 package org.kitsuneninetails.paidytest.server
 
 import akka.AkkaException
-import akka.actor.{Actor, ActorRef, ActorSystem, Props}
+import akka.actor.{Actor, ActorSystem, Props}
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport
 import akka.http.scaladsl.server.Directives._
 import akka.http.scaladsl.server.RouteResult
 import akka.pattern.{ask, pipe}
-
-import com.paidy.authorizations.actors.AddressFraudProbabilityScorer
-import com.paidy.authorizations.actors.AddressFraudProbabilityScorer.ScoreAddress
+import akka.stream.ActorMaterializer
+import akka.util.Timeout
 import com.paidy.domain.Address
-import scala.concurrent.{Await, Future}
-import scala.concurrent.duration._
-
-import akka.http.scaladsl.settings.ServerSettings
-
+import org.kitsuneninetails.paidytest.address_scorer.PassFail
 import spray.json.DefaultJsonProtocol
+
+import scala.concurrent.duration._
+import scala.concurrent.{Await, Future}
 
 final case class Start(server: String,
                        port: Int)
@@ -33,22 +31,30 @@ trait JsonSupport extends SprayJsonSupport with DefaultJsonProtocol {
     implicit val responseFormat = jsonFormat2(ScoreResponse)
 }
 
-class AddressScorerWebServer()
+object AddressScorerWebServer {
+    def props(actorSystem: ActorSystem): Props =
+        Props(new AddressScorerWebServer(actorSystem))
+}
+class AddressScorerWebServer(actorSystem: ActorSystem)
     extends Actor
             with JsonSupport {
-    val scorer: ActorRef = context.actorOf(Props[AddressFraudProbabilityScorer], "scorer")
-    val passFail: ActorRef = context.actorOf(Props[AddressFraudProbabilityScorer], "scorer")
+
+    implicit val timeout = Timeout(5.seconds)
+    implicit val dispatcher = context.dispatcher
+    implicit val materializer = ActorMaterializer.create(context)
+    implicit val sys: ActorSystem = actorSystem
+
     val addressScore = {
         path("addressScore") {
             post {
                 entity(as[ScoreRequest]) { req =>
                     val addr = Address(req.line1, req.line2, req.city,
                                        req.state, req.zipCode)
-                    val score =(scorer ? ScoreAddress(addr)) flatMap _
-                    var passFail =
-                    println(s"${req.line1}, ${req.line2}, ${req.city}, " +
-                            s"${req.state}, ${req.zipCode} == $score")
-                    complete(ScoreResponse(score <= 75.0))
+                    val passFail =
+                        Await.result[Boolean](
+                            (context.actorSelection("../scoreMediator") ? PassFail(addr)).mapTo[Boolean],
+                            5 seconds)
+                    complete(ScoreResponse(passFail))
                 }
             }
         }
@@ -57,7 +63,6 @@ class AddressScorerWebServer()
     override def receive = {
         case Start(server, port) => start(server, port) pipeTo sender()
         case Stop(servFuture) => stop(servFuture)
-        case _ => throw new AkkaException("No messages supported")
     }
 
     def start(server: String, port: Int): Future[Http.ServerBinding] =
