@@ -27,11 +27,10 @@ class AddressFraudProbabilityScorer()
     }
 
     private def scoreAddress(address: Address): Future[Double] = {
-        if (simulateServiceFailure) {
-            Future.failed(throw new Exception(s"Could not score address" +
-                                              s"(address=$address)"))
-        }
-        Future.successful {
+        if (simulateServiceFailure)
+            Future.failed(
+                new Exception(s"Could not score address (address=$address)"))
+        else Future.successful {
             val addressScore = Random.nextDouble()
             simulateServiceLatency()
             addressScore
