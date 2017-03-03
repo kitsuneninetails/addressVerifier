@@ -12,12 +12,8 @@ import scala.concurrent.duration._
 
 final case class PassFail(addr: Address)
 
-object AddressPassFailActor {
-    def props(scoreStore: ScoreStorage): Props =
-        Props(new AddressPassFailActor(scoreStore))
-}
-
-class AddressPassFailActor(val scoreStore: ScoreStorage) extends Actor {
+class AddressPassFailActor extends Actor {
+    val scoreStore: ScoreStorage = new LastTenInMemoryStorage()
     val scorer = context.actorOf(Props[AddressFraudProbabilityScorer], name="scorer")
     implicit val timeout = Timeout(5 seconds)
     implicit val dispatcher = context.dispatcher

@@ -8,10 +8,12 @@ import akka.http.scaladsl.server.Directives._
 import akka.pattern.{ask, pipe}
 import akka.stream.ActorMaterializer
 import akka.util.Timeout
-import com.paidy.domain.{Address, Score}
-import org.kitsuneninetails.paidytest.address_scorer.PassFail
-import spray.json.DefaultJsonProtocol
 
+import com.paidy.domain.{Address, Score}
+
+import org.kitsuneninetails.paidytest.address_scorer.{AddressPassFailActor, PassFail}
+
+import spray.json.DefaultJsonProtocol
 import scala.concurrent.duration._
 import scala.concurrent.{Await, Future, TimeoutException}
 
@@ -44,6 +46,8 @@ class AddressScorerWebServer(actorSystem: ActorSystem)
     implicit val materializer = ActorMaterializer.create(context)
     implicit val sys: ActorSystem = actorSystem
 
+    val scoreHandler = context.actorOf(Props[AddressPassFailActor], name="scoreHandler")
+
     val addressScore = {
         path("addressScore") {
             post {
@@ -51,9 +55,8 @@ class AddressScorerWebServer(actorSystem: ActorSystem)
                     try {
                         val addr = Address(req.line1, req.line2, req.city,
                                            req.state, req.zipCode)
-                        val handler = context.actorSelection("../scoreHandler")
                         val score = Await.result[Score](
-                            ( handler ? PassFail(addr)).mapTo[Score], 5 seconds)
+                            ( scoreHandler ? PassFail(addr)).mapTo[Score], 5 seconds)
                         complete(ScoreResponse(score.pass, score.score, score.average))
                     } catch {
                         case t: TimeoutException =>
