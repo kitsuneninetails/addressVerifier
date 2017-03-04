@@ -68,6 +68,9 @@ Ask messages between actors, as that was a very specific requirement.  If this
 timeout passes, an appropriate response will be sent back to the client via a 
 HTTP Response with a status code of `500`.
  
+_Note: The included SBT file is purely to pull Akka dependencies into my 
+IntelliJ IDE._
+
 Notes
 -----
 
@@ -110,3 +113,11 @@ condition.
 
 With the above code, the web server will return the "Could not score address"
 message immediaetly, rather than waiting for a timeout.
+
+Testing
+-------
+
+Testing was done with `curl` via the command line as well as with a Python
+module (included as clientTester.py) written with the `curl_utils` module from:
+
+http://github.com/kitsuneninetails/python-utils
