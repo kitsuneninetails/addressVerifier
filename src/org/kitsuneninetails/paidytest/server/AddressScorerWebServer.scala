@@ -33,18 +33,14 @@ trait JsonSupport extends SprayJsonSupport with DefaultJsonProtocol {
     implicit val responseFormat = jsonFormat3(ScoreResponse)
 }
 
-object AddressScorerWebServer {
-    def props(actorSystem: ActorSystem): Props =
-        Props(new AddressScorerWebServer(actorSystem))
-}
-class AddressScorerWebServer(actorSystem: ActorSystem)
+class AddressScorerWebServer()
     extends Actor
             with JsonSupport {
 
     implicit val timeout = Timeout(5 seconds)
     implicit val dispatcher = context.dispatcher
     implicit val materializer = ActorMaterializer.create(context)
-    implicit val sys: ActorSystem = actorSystem
+    implicit val sys: ActorSystem = ActorSystem("web-server")
 
     val scoreHandler = context.actorOf(Props[AddressPassFailActor], name="scoreHandler")
 
@@ -80,7 +76,9 @@ class AddressScorerWebServer(actorSystem: ActorSystem)
     def start(server: String, port: Int): Future[Http.ServerBinding] =
         Http().bindAndHandle(addressScore, server, port)
 
-    def stop(bindingFuture: Future[Http.ServerBinding]): Unit=
+    def stop(bindingFuture: Future[Http.ServerBinding]): Unit= {
         bindingFuture.flatMap(_.unbind())
+        sys.terminate()
+    }
 
 }

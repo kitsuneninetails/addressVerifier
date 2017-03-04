@@ -39,11 +39,14 @@ straightforward and simple to get a working REST API server with minimal work.
 The web server is itself implemented as an actor using the Akka Actors library,
 to give it flexibility in its own running space, so it can handle both receiving
 requests from clients and passing messages off to the score assessor.  The start
-and stop messages to the web server will handle the web server's state. The web 
-server creates a child actor which will handle the final verdict of the 
-assessment and pass the result back to the web server to send to the client.  
-When a REST API request is handled, the score assessor will be sent a message 
-to calculate the score result, and that result sent back to the REST API caller.
+and stop messages to the web server will handle the web server's state, as well 
+as handle the HTTP server's actor system (separate from the main actor system as 
+there should be no relationship between the two outside of the REST API handler 
+function(s)). The web server creates a child actor which will handle the final 
+verdict of the assessment and pass the result back to the web server to send to 
+the client. When a REST API request is handled, the score assessor will be sent 
+a message to calculate the score result, and that result sent back to the REST 
+API caller.
 
 The score assessor is also an actor, which will communicate with both its 
 storage medium and the provided `AddressFraudProbabilityScorer` actor. 
