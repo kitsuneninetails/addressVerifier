@@ -8,7 +8,7 @@ import akka.util.Timeout
 import scala.concurrent.duration._
 import scala.io.StdIn
 
-object ScoringServerMain extends App {
+object Main extends App {
     override def main(args: Array[String]): Unit = {
         implicit val timeout = Timeout(5 seconds)
 

@@ -68,8 +68,19 @@ Ask messages between actors, as that was a very specific requirement.  If this
 timeout passes, an appropriate response will be sent back to the client via a 
 HTTP Response with a status code of `500`.
  
-_Note: The included SBT file is purely to pull Akka dependencies into my 
-IntelliJ IDE._
+Building and Running
+-----
+
+This project has a `build.sbt` file, so to build, please run:
+
+    sbt compile
+    
+This should download akka and other dependencies.  The project also defines a 
+`Main` object, so you can:
+
+    sbt run
+    
+to run the server.  
 
 Notes
 -----
