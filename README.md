@@ -16,15 +16,12 @@ POST message should be a JSON with the following structure:
 The return reponse will contain a JSON message of the following structure:
     
     {
-        "success": TRUE or FALSE,
-        "score": The score for this individual assessment,
-        "average": The average of the last ten assessments (or this score if
-                   there are less then ten assessments recorded).
+        "success": TRUE or FALSE
      }
      
-The "success" field will be `FALSE` if `score` < 0.78 or if `average` < 0.70
-*AND* there were at least ten assessments to draw an average from (this
-parameter will be ignored otherwise).  Otherwise, the field will be `TRUE`.
+The "success" field will be `FALSE` if `score` > 0.78 or if there is at least
+ten scores recorded for this address (including the current score) and the
+average of those ten scores > 0.70.  Otherwise, the field will be `TRUE`.
 
 In case of an error on the server side (through timeout or error in processing 
 the request), the HTTP response will have a status code of `500` and a
@@ -35,39 +32,70 @@ Implementation
 
 The REST API web server is implemented with Akka HTTP, as it was fairly
 straightforward and simple to get a working REST API server with minimal work.
- 
-The web server is itself implemented as an actor using the Akka Actors library,
-to give it flexibility in its own running space, so it can handle both receiving
-requests from clients and passing messages off to the score assessor.  The start
-and stop messages to the web server will handle the web server's state, as well 
-as handle the HTTP server's actor system (separate from the main actor system as 
-there should be no relationship between the two outside of the REST API handler 
-function(s)). The web server creates a child actor which will handle the final 
-verdict of the assessment and pass the result back to the web server to send to 
-the client. When a REST API request is handled, the score assessor will be sent 
-a message to calculate the score result, and that result sent back to the REST 
-API caller.
+It is implemented in the main application method.
 
-The score assessor is also an actor, which will communicate with both its 
-storage medium and the provided `AddressFraudProbabilityScorer` actor. 
-For simplicity in this case, the storage medium is implemented as an in-memory, 
-mutable queue limited to 10 items to make it easier to contain growth over time, 
-as only the last 10 items are required for the score averaging.  In other cases,
-this could be implemented as a database connector or other client to a remote 
-data store.
+The score assessor `passOrFail` is implemented as a high-level function which
+takes two functions as parameters, "`sf`" to test the score, and "`af`" to test
+a list of scores.  A second function `passOrFail78And70` partially applies the
+`passFail` function to use a (score < 0.78) and an (average of list elements < 0.70)
+as the assessment functions, as those were the required levels set by the problem
+statement.  The `passOrFail` will make a list with the newest score as the head,
+and the last nine scores as the tail.  It will then return:
 
-The communication between actors is handled with Actor messaging, using "ask" 
-requests to receive a Scala Future object, which can then be handled 
-asynchronously.  Only the web server itself will wait on the result of the 
-future, as it must have that information before it can satisfy the REST API 
-call.  The other actors will pipe futures back to the caller, whether they be 
-successful or indicative of failure conditions.
+    sf(current score) && af(current score :: past 9 scores)
 
-A hard timeout of 5 seconds is specified for the future Await as well as all 
-Ask messages between actors, as that was a very specific requirement.  If this 
-timeout passes, an appropriate response will be sent back to the client via a 
-HTTP Response with a status code of `500`.
- 
+and
+
+    currentScore :: past 9 scores
+
+as a return value.  The return value is encapsulated in a case class called
+`PFReturn` (which has a Boolean and a List) for organization's sake.
+
+The past scores are stored in memory, via an actor called `CurrentScores`.  This
+actos has a variable (immutable) map of address keys to score lists.  This map
+will be reassigned to a new, updated map each time the `SetScores` message is
+received with an address key and a new score list to use for that key.  The
+`GetScore` method will return the score list for a given address key.  This way
+the actual creation of the new score list is handled by the caller of
+`SetScores` and the private variable for the map is hidden and accessible only
+via the `SetScores` method, which should make it easier to identify the
+side-effect of reassigning `CurrentScores`'s map.
+
+The flow is:
+
+* For every score request that enters the web server:
+  * A Future chain begins with the call to the provided
+`AddressFraudProbabilityScorer` with the address sent by the HTTP client.
+  * This chains to a `GetScores` call to the in-memory storage actor
+`CurrentScores` in order to get the list of past scores for this address key.
+  * This finally chains to the `passOrFail78And70` call to assess whether
+the score passed or failed.
+  * The return from this chain is a `Future[PFReturn]`.  If any part of the
+above chain (except the last `passOrFail` call) fails, this future will be a 
+`Failure` (and no further calls in the chain will be made).  If every part of
+the chain succeeds, this return will be a `Success(PFReturn)` with the returned
+value from `passOrFail78And70` to be set when the future completes.
+* The flow then blocks on return of this future chain, with a 5 second timeout
+(also set by the problem statement).  This block is accomplished with a `Try`
+function, meaning a failure to return within the timeout will be handled as a
+failed Future, which aligns with the possible failed future from above.  This
+means that any failure along the way will be set to a `Failure` object, and can
+be handled with one pattern matching block.
+* The return of the blocking `Try` is pattern matched and handled.
+  * A `Success` condition will first make an asychronous message (i.e. tell) to
+the `CurrentScores` actor to reset the score list for this address key to the
+list returned by the `passOrFail78And70` call above.  It will then return the
+pass/fail result to the HTTP client.
+  * A `Failure` condition is matched to see which exception was thrown, in
+order to provide a cleaner message to the user in case of a timeout (users don't
+need to see "Futures timed out message", so instead a "API timeout" message
+will be substituted in the HTTP Response), and an HTTP error response is
+returned.
+
+For the purposes of simplicty and clarity for this problem, the HTTP server is
+simply started in the Main app and is terminated with the press of "ENTER" at
+the console.
+
 Building and Running
 -----
 

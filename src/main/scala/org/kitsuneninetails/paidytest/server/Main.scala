@@ -46,18 +46,18 @@ object Main extends App with JsonSupport {
         val scoreHandler = system.actorOf(Props[AddressFraudProbabilityScorer])
         val currentScores = system.actorOf(Props[CurrentScores])
 
-        def passOrFail(currentScore: Double,
-                       pastScores: List[Double])
+        def passOrFail(cs: Double,
+                       ps: List[Double])
                       (sf: Double => Boolean)
                       (af: List[Double] => Boolean): PFReturn = {
-            val newScores = (currentScore :: pastScores) take 10
-            PFReturn(sf(currentScore) && af(newScores), newScores)
+            val newScores = (cs :: ps) take 10
+            PFReturn(sf(cs) && af(newScores), newScores)
         }
 
-        def passOrFail78And70(currentScore: Double,
-                              pastScores: List[Double]): PFReturn = {
+        def passOrFail78And70(cs: Double,
+                              ps: List[Double]): PFReturn = {
             def avg(l: List[Double]): Double = l.sum / l.size
-            passOrFail(currentScore, pastScores) {_ < 0.78} {l => if (l.size < 10) true else avg(l) < 0.70}
+            passOrFail(cs, ps) {_ < 0.78} {l => if (l.size < 10) true else avg(l) < 0.70}
         }
 
         val addressScore = {
@@ -75,6 +75,8 @@ object Main extends App with JsonSupport {
                         val scoreResult = Try(Await.result(scoreFuture, 5 seconds))
                         scoreResult match {
                             case Success(pfRet) =>
+                                // Side-effect of having the in-memory map be re-assigned
+                                // with the new list given here.
                                 currentScores ! CurrentScores.SetScores(addr.hash(), pfRet.newScores)
                                 complete(ScoreResponse(pfRet.passFail))
                             case Failure(e) =>
