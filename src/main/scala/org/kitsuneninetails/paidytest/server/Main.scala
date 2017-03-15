@@ -1,11 +1,8 @@
 package org.kitsuneninetails.paidytest.server
 
-import java.util.concurrent.TimeoutException
-
 import akka.actor.{ActorSystem, Props}
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport
-import akka.http.scaladsl.model.{HttpResponse, StatusCodes}
 import akka.http.scaladsl.server.Directives._
 import akka.http.scaladsl.server.Route
 import akka.pattern.ask
@@ -17,9 +14,7 @@ import com.paidy.domain.Address
 import spray.json.DefaultJsonProtocol
 
 import scala.concurrent.duration._
-import scala.concurrent.{Await, Future, TimeoutException}
 import scala.io.StdIn
-import scala.util.{Failure, Success, Try}
 
 final case class ScoreRequest(line1: String,
                               line2: String,
@@ -32,13 +27,9 @@ trait JsonSupport extends SprayJsonSupport with DefaultJsonProtocol {
     implicit val requestFormat = jsonFormat5(ScoreRequest)
     implicit val responseFormat = jsonFormat1(ScoreResponse)
 }
-
-case class PFReturn(passFail: Boolean, newScores: List[Double])
-
 object Main extends App with JsonSupport {
     override def main(args: Array[String]): Unit = {
         implicit val timeout = Timeout(5 seconds)
-
         implicit val system = ActorSystem("main-actors")
         implicit val materializer = ActorMaterializer()
         implicit val executionContext = system.dispatcher
@@ -46,18 +37,10 @@ object Main extends App with JsonSupport {
         val scoreHandler = system.actorOf(Props[AddressFraudProbabilityScorer])
         val currentScores = system.actorOf(Props[CurrentScores])
 
-        def passOrFail(cs: Double,
-                       ps: List[Double])
-                      (sf: Double => Boolean)
-                      (af: List[Double] => Boolean): PFReturn = {
-            val newScores = (cs :: ps) take 10
-            PFReturn(sf(cs) && af(newScores), newScores)
-        }
-
         def passOrFail78And70(cs: Double,
-                              ps: List[Double]): PFReturn = {
-            def avg(l: List[Double]): Double = l.sum / l.size
-            passOrFail(cs, ps) {_ < 0.78} {l => if (l.size < 10) true else avg(l) < 0.70}
+                              ps: Vector[Double]): Boolean = {
+            val avg: Vector[Double] => Double = l => l.sum / l.size
+            (cs < 0.78) && (if (ps.size < 10) true else avg(ps) < 0.70)
         }
 
         val addressScore = {
@@ -69,27 +52,11 @@ object Main extends App with JsonSupport {
                             req.state, req.zipCode)
                         val scoreFuture = for {
                             f1 <- (scoreHandler ? ScoreAddress(addr)).mapTo[Double]
-                            f2 <- (currentScores ? CurrentScores.GetScores(addr.hash())).mapTo[List[Double]]
+                            f2 <- (currentScores ? CurrentScores.GetNewScores(addr.hash(), f1)).mapTo[Vector[Double]]
+                            _ <- currentScores ? CurrentScores.SetScores(addr.hash(), f2)
                         } yield passOrFail78And70(f1, f2)
 
-                        val scoreResult = Try(Await.result(scoreFuture, 5 seconds))
-                        scoreResult match {
-                            case Success(pfRet) =>
-                                // Side-effect of having the in-memory map be re-assigned
-                                // with the new list given here.
-                                currentScores ! CurrentScores.SetScores(addr.hash(), pfRet.newScores)
-                                complete(ScoreResponse(pfRet.passFail))
-                            case Failure(e) =>
-                                e match {
-                                    case e: TimeoutException =>
-                                        complete(HttpResponse(
-                                            StatusCodes.InternalServerError,
-                                            entity = "Request took longer than 5 seconds to complete"))
-                                    case _ =>
-                                        complete(HttpResponse(
-                                            StatusCodes.InternalServerError, entity = e.getMessage))
-                                }
-                        }
+                        complete(scoreFuture map {p => ScoreResponse(p)})
                     }
                 }
             }

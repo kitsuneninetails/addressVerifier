@@ -10,22 +10,23 @@ import scala.concurrent.duration._
 
 object CurrentScores {
     case class SetScores(key: String,
-                         scores: List[Double])
-    case class GetScores(key:String)
+                         scores: Vector[Double])
+    case class GetNewScores(key:String,
+                            score: Double)
 }
 
 class CurrentScores extends Actor {
-    type ScoreMap = Map[String, List[Double]]
-    private var currentScoreMap: ScoreMap = Map()
+    type ScoreMap = Map[String, Vector[Double]]
 
     implicit val timeout = Timeout(5.seconds)
     implicit val dispatcher = context.dispatcher
 
     import CurrentScores._
 
-    override def receive(): Receive = {
-        case SetScores(key, scores) => currentScoreMap += (key -> scores)
-        case GetScores(key) => Future(currentScoreMap.getOrElse(key, List())) pipeTo sender()
+    def myReceive(csMap: ScoreMap = Map()): Receive = {
+        case SetScores(key, scores) => Future(context.become(myReceive(csMap + (key -> (scores take 9))))) pipeTo sender()
+        case GetNewScores(key, score) => Future(score +: csMap.getOrElse(key, Vector())) pipeTo sender()
     }
+    override def receive(): Receive = myReceive(Map())
 
 }
